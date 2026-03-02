@@ -707,6 +707,13 @@ class TestWriteOperations:
         backend.update_task_entry(1, "new-name", "desc", None, None)
         mock_luskctl["task_rename"].assert_called_once_with("myproj", "1", "new-name")
 
+    def test_update_task_entry_system_exit_raises_runtime_error(
+        self, backend, mock_luskctl
+    ):
+        mock_luskctl["task_rename"].side_effect = SystemExit(1)
+        with pytest.raises(RuntimeError, match="Failed to rename task 1"):
+            backend.update_task_entry(1, "new-name", "desc", None, None)
+
 
 # ---------- Category management ----------
 

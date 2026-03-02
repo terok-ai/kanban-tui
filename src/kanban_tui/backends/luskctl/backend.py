@@ -483,7 +483,9 @@ class LuskctlBackend(Backend):
 
         Moves to Ready (col 1) and Stopped (col 6) are always blocked.
         """
-        pid = new_task.metadata.get("project_id", self._active_project_id())
+        pid = new_task.metadata.get("project_id")
+        if not pid:
+            pid = self._require_writable_project_id()
         tid = str(new_task.task_id)
         target_col = new_task.column
         mode = new_task.metadata.get("mode")
@@ -507,8 +509,10 @@ class LuskctlBackend(Backend):
             if target_col == 2:
                 try:
                     task_restart(pid, tid)
-                except SystemExit:
-                    pass
+                except SystemExit as exc:
+                    raise RuntimeError(
+                        f"Failed to restart task {tid} in project {pid}"
+                    ) from exc
             return
 
         # Autopilot (mode=run) tasks
@@ -530,8 +534,10 @@ class LuskctlBackend(Backend):
                 write_work_status(ac_dir, _PHASE_WORK_STATUS[target_col])
                 try:
                     task_followup_headless(pid, tid, prompt=prompt, follow=False)
-                except SystemExit:
-                    pass
+                except SystemExit as exc:
+                    raise RuntimeError(
+                        f"Failed to run follow-up for task {tid} in project {pid}"
+                    ) from exc
 
     def update_task_entry(
         self,
