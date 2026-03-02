@@ -3,6 +3,7 @@
 All luskctl library functions are mocked — tests verify backend logic only.
 """
 
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -38,6 +39,45 @@ def _make_project(pid="myproj", security_class="online", root="/tmp/proj"):
     return p
 
 
+@dataclass
+class _TaskMetaStub:
+    """Test stub for TaskMeta with dynamic status property."""
+
+    task_id: str = "1"
+    name: str = ""
+    mode: str | None = None
+    workspace: str = ""
+    web_port: int | None = None
+    backend: str | None = None
+    container_state: str | None = None
+    exit_code: int | None = None
+    deleting: bool = False
+    preset: str | None = None
+    work_status: str | None = None
+    work_message: str | None = None
+
+    @property
+    def status(self) -> str:
+        """Compute effective status dynamically (mirrors luskctl logic)."""
+        if self.deleting:
+            return "deleting"
+        if self.container_state == "running":
+            return "running"
+        if self.container_state is not None:
+            if self.exit_code == 0:
+                return "completed"
+            if self.exit_code is not None:
+                return "failed"
+            return "stopped"
+        if self.mode is None:
+            return "created"
+        if self.exit_code == 0:
+            return "completed"
+        if self.exit_code is not None:
+            return "failed"
+        return "not found"
+
+
 def _make_task_meta(
     task_id="1",
     name="",
@@ -52,41 +92,21 @@ def _make_task_meta(
     work_status=None,
     work_message=None,
 ):
-    """Create a mock TaskMeta object."""
-    t = MagicMock()
-    t.task_id = task_id
-    t.name = name or f"task-{task_id}"
-    t.mode = mode
-    t.workspace = workspace
-    t.web_port = web_port
-    t.backend = backend
-    t.container_state = container_state
-    t.exit_code = exit_code
-    t.deleting = deleting
-    t.preset = preset
-    t.work_status = work_status
-    t.work_message = work_message
-    # status property uses effective_status logic
-    if deleting:
-        t.status = "deleting"
-    elif container_state == "running":
-        t.status = "running"
-    elif container_state is not None:
-        if exit_code == 0:
-            t.status = "completed"
-        elif exit_code is not None:
-            t.status = "failed"
-        else:
-            t.status = "stopped"
-    elif mode is None:
-        t.status = "created"
-    elif exit_code == 0:
-        t.status = "completed"
-    elif exit_code is not None:
-        t.status = "failed"
-    else:
-        t.status = "not found"
-    return t
+    """Create a TaskMeta stub with dynamic status."""
+    return _TaskMetaStub(
+        task_id=task_id,
+        name=name or f"task-{task_id}",
+        mode=mode,
+        workspace=workspace,
+        web_port=web_port,
+        backend=backend,
+        container_state=container_state,
+        exit_code=exit_code,
+        deleting=deleting,
+        preset=preset,
+        work_status=work_status,
+        work_message=work_message,
+    )
 
 
 @pytest.fixture
@@ -242,7 +262,7 @@ class TestBoardManagement:
 
         settings = LuskctlBackendSettings()
         be = LuskctlBackend(settings)
-        with pytest.raises(Exception, match="No luskctl projects found"):
+        with pytest.raises(RuntimeError, match="No luskctl projects found"):
             _ = be.active_board
 
     def test_board_infos(self, backend, mock_luskctl):

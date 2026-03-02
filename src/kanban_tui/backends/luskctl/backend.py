@@ -198,7 +198,7 @@ class LuskctlBackend(Backend):
         """Return the active board (project)."""
         boards = self.get_boards()
         if not boards:
-            raise Exception("No luskctl projects found")
+            raise RuntimeError("No luskctl projects found")
         active_pid = self._active_project_id()
         for board in boards:
             if board.name == active_pid:
