@@ -203,17 +203,18 @@ class LuskctlBackend(Backend):
         return boards[0]
 
     def get_board_infos(self):
-        """Return summary info for all boards."""
+        """Return summary info for all boards (read-only, no side-effects)."""
         boards = self.get_boards()
         infos = []
         for board in boards:
-            tasks = self.get_tasks_by_board(board.board_id)
+            pid = self._board_id_to_project_id.get(board.board_id)
+            task_count = len(get_tasks(pid)) if pid else 0
             infos.append(
                 {
                     "board_id": board.board_id,
                     "name": board.name,
                     "icon": board.icon,
-                    "amount_tasks": len(tasks),
+                    "amount_tasks": task_count,
                     "amount_columns": len(_COLUMNS),
                     "next_due": None,
                 }
@@ -443,9 +444,7 @@ class LuskctlBackend(Backend):
         due_date: datetime | None = None,
     ) -> Task:
         """Create a new task via luskctl library."""
-        pid = self._active_project_id()
-        if not pid:
-            raise RuntimeError("No luskctl project available for write operation")
+        pid = self._require_writable_project_id()
         task_id_str = task_new(pid, name=title)
         # Re-read the task from disk
         try:
@@ -456,13 +455,20 @@ class LuskctlBackend(Backend):
             raise RuntimeError(f"Task {task_id_str} created but not found in state")
         return task
 
+    def _require_writable_project_id(self) -> str:
+        """Return the active project ID, raising if unavailable."""
+        pid = self._active_project_id()
+        if not pid:
+            raise RuntimeError("No luskctl project available for write operation")
+        return pid
+
     def delete_task(self, task_id: int):
         """Delete a task via luskctl library."""
-        pid = self._active_project_id()
+        pid = self._require_writable_project_id()
         try:
             task_delete(pid, str(task_id))
-        except SystemExit:
-            pass
+        except SystemExit as exc:
+            raise RuntimeError(f"Failed to delete task {task_id}") from exc
 
     def update_task_status(self, new_task: Task):
         """Handle column changes — trigger development phase transitions.
@@ -536,11 +542,11 @@ class LuskctlBackend(Backend):
         due_date: datetime | None,
     ) -> Task | None:
         """Rename a task via luskctl library."""
-        pid = self._active_project_id()
+        pid = self._require_writable_project_id()
         try:
             task_rename(pid, str(task_id), title)
-        except SystemExit:
-            pass
+        except SystemExit as exc:
+            raise RuntimeError(f"Failed to rename task {task_id}") from exc
         return self.get_task_by_id(task_id)
 
     # === Not Implemented (projects/columns managed outside kanban-tui) ===

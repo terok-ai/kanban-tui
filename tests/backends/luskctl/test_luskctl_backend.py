@@ -256,6 +256,13 @@ class TestBoardManagement:
         assert infos[0]["amount_tasks"] == 2
         assert infos[0]["amount_columns"] == len(_COLUMNS)
 
+    def test_board_infos_is_read_only(self, backend, mock_luskctl):
+        mock_luskctl["get_tasks"].return_value = [_make_task_meta("1")]
+        backend.get_board_infos()
+        mock_luskctl["get_all_task_states"].assert_not_called()
+        mock_luskctl["read_pending_phase"].assert_not_called()
+        mock_luskctl["write_work_status"].assert_not_called()
+
     def test_board_markers(self, backend):
         board = backend.active_board
         assert board.reset_column == 1  # Ready
@@ -688,10 +695,10 @@ class TestWriteOperations:
         backend.delete_task(1)
         mock_luskctl["task_delete"].assert_called_once_with("myproj", "1")
 
-    def test_delete_task_system_exit_handled(self, backend, mock_luskctl):
+    def test_delete_task_system_exit_raises_runtime_error(self, backend, mock_luskctl):
         mock_luskctl["task_delete"].side_effect = SystemExit(1)
-        # Should not raise
-        backend.delete_task(1)
+        with pytest.raises(RuntimeError, match="Failed to delete task 1"):
+            backend.delete_task(1)
 
     def test_update_task_entry_renames(self, backend, mock_luskctl):
         meta = _make_task_meta("1", name="new-name", mode=None)
