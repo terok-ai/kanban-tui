@@ -151,8 +151,9 @@ class LuskctlBackend(Backend):
 
     def _active_project_id(self) -> str:
         """Return the active project ID, falling back to first project."""
-        if self.settings.active_project_id:
-            return self.settings.active_project_id
+        active = self.settings.active_project_id
+        if active and any(p.id == active for p in self._projects):
+            return active
         if self._projects:
             return self._projects[0].id
         return ""

@@ -226,6 +226,17 @@ class TestBoardManagement:
         board = be.active_board
         assert board.name == "first"
 
+    def test_stale_active_project_fallback_used_for_create(self, mock_luskctl):
+        proj = _make_project("first")
+        mock_luskctl["list_projects"].return_value = [proj]
+        be = LuskctlBackend(LuskctlBackendSettings(active_project_id="nonexistent"))
+
+        mock_luskctl["task_new"].return_value = "42"
+        mock_luskctl["get_tasks"].return_value = [_make_task_meta("42", mode=None)]
+
+        be.create_new_task("my-task", "desc", column=1)
+        mock_luskctl["task_new"].assert_called_once_with("first", name="my-task")
+
     def test_no_projects_raises(self, mock_luskctl):
         mock_luskctl["list_projects"].return_value = []
 
