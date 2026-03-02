@@ -10,8 +10,11 @@ All reads and writes go through the luskctl Python library.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from kanban_tui.backends.base import Backend
 from kanban_tui.classes.board import Board
@@ -391,7 +394,13 @@ class LuskctlBackend(Backend):
                         )
                         clear_pending_phase(ac_dir)
                     except SystemExit:
-                        pass  # leave pending-phase.yml for retry on next poll
+                        logger.warning(
+                            "Deferred follow-up failed; leaving pending phase for retry"
+                            " (project=%s, task=%s, phase=%s)",
+                            pid,
+                            task.task_id,
+                            pp.phase,
+                        )
                 # Update fields so the card reflects the new state
                 task.work_status = pp.phase
 
@@ -484,7 +493,7 @@ class LuskctlBackend(Backend):
         Moves to Ready (col 1) and Stopped (col 6) are always blocked.
         """
         pid = new_task.metadata.get("project_id")
-        if not pid:
+        if not pid or pid not in self._project_id_to_board_id:
             pid = self._require_writable_project_id()
         tid = str(new_task.task_id)
         target_col = new_task.column

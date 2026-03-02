@@ -511,6 +511,42 @@ class TestImmediatePhaseTransition:
         )
         mock_luskctl["write_work_status"].assert_called_once()
 
+    def test_stopped_interactive_restart_system_exit_raises_runtime_error(
+        self, backend, mock_luskctl
+    ):
+        task = Task(
+            task_id=1,
+            title="task-1",
+            creation_date=_NOW,
+            column=2,
+            metadata={
+                "project_id": "myproj",
+                "mode": "web",
+                "container_status": "stopped",
+            },
+        )
+        mock_luskctl["task_restart"].side_effect = SystemExit(1)
+        with pytest.raises(RuntimeError, match="Failed to restart task 1"):
+            backend.update_task_status(task)
+
+    def test_stopped_autopilot_followup_system_exit_raises_runtime_error(
+        self, backend, mock_luskctl
+    ):
+        task = Task(
+            task_id=1,
+            title="task-1",
+            creation_date=_NOW,
+            column=3,
+            metadata={
+                "project_id": "myproj",
+                "mode": "run",
+                "container_status": "stopped",
+            },
+        )
+        mock_luskctl["task_followup_headless"].side_effect = SystemExit(1)
+        with pytest.raises(RuntimeError, match="Failed to run follow-up for task 1"):
+            backend.update_task_status(task)
+
     def test_stopped_autopilot_done_writes_status(self, backend, mock_luskctl):
         task = Task(
             task_id=1,
