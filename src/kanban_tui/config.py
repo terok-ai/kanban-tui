@@ -24,6 +24,7 @@ class Backends(StrEnum):
     SQLITE = "sqlite"
     JIRA = "jira"
     CLAUDE = "claude"
+    LUSKCTL = "luskctl"
 
 
 class MovementModes(StrEnum):
@@ -66,6 +67,13 @@ class ClaudeBackendSettings(BaseModel):
     active_session_id: str = Field(default="")
 
 
+class LuskctlBackendSettings(BaseModel):
+    state_root: str = Field(default="")
+    config_root: str = Field(default="")
+    active_project_id: str = Field(default="")
+    workflow: str = Field(default="standard")
+
+
 class BackendSettings(BaseModel):
     mode: Backends = Field(default=Backends("sqlite"))
     sqlite_settings: SqliteBackendSettings = Field(
@@ -74,6 +82,9 @@ class BackendSettings(BaseModel):
     jira_settings: JiraBackendSettings = Field(default_factory=JiraBackendSettings)
     claude_settings: ClaudeBackendSettings = Field(
         default_factory=ClaudeBackendSettings
+    )
+    luskctl_settings: LuskctlBackendSettings = Field(
+        default_factory=LuskctlBackendSettings
     )
 
 
@@ -116,6 +127,10 @@ class Settings(BaseSettings):
 
     def set_active_claude_session(self, new_session_id: str) -> None:
         self.backend.claude_settings.active_session_id = new_session_id
+        self.save()
+
+    def set_active_luskctl_project(self, new_project_id: str) -> None:
+        self.backend.luskctl_settings.active_project_id = new_project_id
         self.save()
 
     def set_base_url(self, new_base_url: str) -> None:
