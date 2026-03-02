@@ -84,9 +84,19 @@ class KanbanTui(App[str | None]):
                 from kanban_tui.backends.claude.backend import ClaudeBackend
 
                 backend = ClaudeBackend(self.config.backend.claude_settings)
+            case Backends.LUSKCTL:
+                try:
+                    from kanban_tui.backends.luskctl.backend import LuskctlBackend
+                except ImportError as exc:
+                    raise ImportError(
+                        "luskctl backend requires the luskctl package. "
+                        'Install with: uv tool install "kanban-tui[luskctl]"'
+                    ) from exc
+
+                backend = LuskctlBackend(self.config.backend.luskctl_settings)
             case _:
                 raise NotImplementedError(
-                    "Only sqlite, jira, and claude backends are supported"
+                    "Only sqlite, jira, claude, and luskctl backends are supported"
                 )
 
         return backend
@@ -175,6 +185,41 @@ class KanbanTui(App[str | None]):
                     message="Read-only mode: viewing Claude Code tasks from ~/.claude/tasks/",
                     severity="information",
                 )
+            case Backends.LUSKCTL:
+                try:
+                    from kanban_tui.backends.luskctl.data_reader import (
+                        HAS_LUSKCTL,
+                        list_projects,
+                    )
+                except ImportError:
+                    HAS_LUSKCTL = False
+                if not HAS_LUSKCTL:
+                    self.notify(
+                        title="luskctl backend not available",
+                        message='Install with: uv tool install "kanban-tui[luskctl]"',
+                        severity="warning",
+                    )
+                    with self.prevent(Select.Changed):
+                        event.select.value = f"✔  {self.app.config.backend.mode}"
+                    self.action_focus_next()
+                    return
+                projects = list_projects()
+                if not projects:
+                    self.notify(
+                        title="luskctl backend not available",
+                        message="No luskctl projects found. Create one with 'luskctl project-init'.",
+                        severity="warning",
+                    )
+                    with self.prevent(Select.Changed):
+                        event.select.value = f"✔  {self.app.config.backend.mode}"
+                    self.action_focus_next()
+                    return
+                self.config.set_backend(new_backend=backend_value)
+                self.notify(
+                    title="luskctl backend activated",
+                    message=f"Found {len(projects)} project(s).",
+                    severity="information",
+                )
         self.backend = self.get_backend()
         # This make the checkmark on the new backend
         event.select.update_values()
@@ -196,6 +241,10 @@ class KanbanTui(App[str | None]):
                 case Backends.CLAUDE:
                     self.config.set_active_claude_session(
                         new_session_id=self.active_board.name
+                    )
+                case Backends.LUSKCTL:
+                    self.config.set_active_luskctl_project(
+                        new_project_id=self.active_board.name
                     )
                 case Backends.JIRA:
                     self.config.set_active_jql(new_jql=self.active_board.board_id)
