@@ -54,7 +54,7 @@ mcp = [
     "pycli-mcp>=0.3.0",
 ]
 luskctl = [
-    "pyyaml>=6.0",
+    "luskctl",
 ]
 
 

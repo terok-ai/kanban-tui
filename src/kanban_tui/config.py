@@ -68,8 +68,6 @@ class ClaudeBackendSettings(BaseModel):
 
 
 class LuskctlBackendSettings(BaseModel):
-    state_root: str = Field(default="")
-    config_root: str = Field(default="")
     active_project_id: str = Field(default="")
     workflow: str = Field(default="standard")
 

@@ -5,15 +5,13 @@ Maps luskctl concepts to kanban-tui models with development workflow columns:
 - Dev phases -> Columns  (Ready / Coding / Testing / Review / Done / Stopped)
 - Tasks     -> Cards     (with live container state + agent work status)
 
-Read operations query YAML files + podman directly.
-Write operations delegate to the ``luskctl`` CLI via subprocess.
+All reads and writes go through the luskctl Python library.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 
 from kanban_tui.backends.base import Backend
 from kanban_tui.classes.board import Board
@@ -22,19 +20,21 @@ from kanban_tui.classes.column import Column
 from kanban_tui.classes.task import Task
 from kanban_tui.config import LuskctlBackendSettings
 
-from . import cli_bridge
 from .data_reader import (
-    LuskctlProjectInfo,
-    LuskctlTaskMeta,
-    _agent_config_dir,
-    _resolve_config_roots,
-    _resolve_state_root,
+    WORK_STATUS_DISPLAY,
+    PendingPhase,
+    agent_config_dir,
     clear_pending_phase,
-    discover_projects,
-    effective_status,
-    query_container_states,
-    read_task_metas,
-    resolve_task_container_state,
+    get_all_task_states,
+    get_tasks,
+    list_projects,
+    load_project,
+    read_pending_phase,
+    task_delete,
+    task_followup_headless,
+    task_new,
+    task_rename,
+    task_restart,
     write_pending_phase,
     write_work_status,
 )
@@ -63,18 +63,6 @@ _PHASE_WORK_STATUS: dict[int, str] = {
     5: "done",
 }
 
-_WORK_STATUS_EMOJI: dict[str, str] = {
-    "planning": "\U0001f4cb",
-    "coding": "\U0001f4bb",
-    "testing": "\U0001f9ea",
-    "debugging": "\U0001f41b",
-    "reviewing": "\U0001f50d",
-    "documenting": "\U0001f4dd",
-    "done": "\u2705",
-    "blocked": "\U0001f6a7",
-    "error": "\u26a0\ufe0f",
-}
-
 # Mode categories
 _MODE_CATEGORIES: list[tuple[int, str, str]] = [
     (1, "CLI", "#004578"),
@@ -94,25 +82,23 @@ _SECURITY_ICONS: dict[str, str] = {
 }
 
 
-def _resolve_column(
-    container_status: str, work_status: str | None, mode: str | None
-) -> int:
-    """Map (container_status, work_status) to a column ID.
+def _resolve_column(effective_status: str, work_status: str | None) -> int:
+    """Map (effective_status, work_status) to a column ID.
 
     Infrastructure states (stopped, failed, created, deleting) always
     override work status.  When the container is running, work status
     picks the column.  Running with no status file defaults to Coding.
     """
     # Infrastructure states -> fixed columns
-    if container_status in ("created",):
+    if effective_status == "created":
         return 1  # Ready
-    if container_status in ("stopped", "not found", "deleting", "failed"):
+    if effective_status in ("stopped", "not found", "deleting", "failed"):
         return 6  # Stopped
-    if container_status == "completed":
+    if effective_status == "completed":
         return 5  # Done
 
     # Running -> use work status
-    if container_status == "running":
+    if effective_status == "running":
         match work_status:
             case "testing":
                 return 3
@@ -132,46 +118,34 @@ def _resolve_column(
 class LuskctlBackend(Backend):
     """Backend mapping luskctl tasks to development workflow columns.
 
-    Zero Python dependency on luskctl — reads filesystem state directly
-    and shells out to ``luskctl`` CLI for write operations.
+    Uses the luskctl Python library for all reads and writes.
     """
 
     settings: LuskctlBackendSettings
 
     # Internal caches — rebuilt on each get_boards() / get_tasks*() call.
-    _projects: list[LuskctlProjectInfo] = field(default_factory=list, repr=False)
     _project_id_to_board_id: dict[str, int] = field(default_factory=dict, repr=False)
     _board_id_to_project_id: dict[int, str] = field(default_factory=dict, repr=False)
 
     def __post_init__(self):
-        self._state_root = (
-            Path(self.settings.state_root).expanduser().resolve()
-            if self.settings.state_root
-            else _resolve_state_root()
-        )
-        self._config_roots = (
-            [Path(self.settings.config_root).expanduser().resolve()]
-            if self.settings.config_root
-            else _resolve_config_roots()
-        )
         self._refresh_projects()
 
     def _refresh_projects(self):
-        """Discover projects and rebuild ID mappings."""
-        self._projects = discover_projects(self._config_roots)
+        """Discover projects via luskctl library and rebuild ID mappings."""
+        self._projects = list_projects()
         self._project_id_to_board_id = {}
         self._board_id_to_project_id = {}
         for idx, p in enumerate(self._projects, start=1):
-            self._project_id_to_board_id[p.project_id] = idx
-            self._board_id_to_project_id[idx] = p.project_id
+            self._project_id_to_board_id[p.id] = idx
+            self._board_id_to_project_id[idx] = p.id
 
-    def _project_for_board(self, board_id: int) -> LuskctlProjectInfo | None:
-        """Return the project info for a board, or None."""
+    def _project_for_board(self, board_id: int):
+        """Return the project for a board, or None."""
         pid = self._board_id_to_project_id.get(board_id)
         if pid is None:
             return None
         for p in self._projects:
-            if p.project_id == pid:
+            if p.id == pid:
                 return p
         return None
 
@@ -180,12 +154,13 @@ class LuskctlBackend(Backend):
         if self.settings.active_project_id:
             return self.settings.active_project_id
         if self._projects:
-            return self._projects[0].project_id
+            return self._projects[0].id
         return ""
 
-    def _get_agent_config_dir(self, project_id: str, task_id: str) -> Path:
+    def _get_agent_config_dir(self, project_id: str, task_id: str):
         """Return the agent-config directory for a task."""
-        return _agent_config_dir(self._state_root, project_id, task_id)
+        project = load_project(project_id)
+        return agent_config_dir(project, task_id)
 
     # === Board Management ===
 
@@ -194,7 +169,7 @@ class LuskctlBackend(Backend):
         self._refresh_projects()
         boards: list[Board] = []
         for proj in self._projects:
-            bid = self._project_id_to_board_id[proj.project_id]
+            bid = self._project_id_to_board_id[proj.id]
             icon = _SECURITY_ICONS.get(proj.security_class, "\U0001f4e6")
             try:
                 ctime = proj.root.stat().st_ctime
@@ -204,11 +179,11 @@ class LuskctlBackend(Backend):
             boards.append(
                 Board(
                     board_id=bid,
-                    name=proj.project_id,
+                    name=proj.id,
                     icon=icon,
                     creation_date=creation,
-                    reset_column=1,   # Ready
-                    start_column=2,   # Coding
+                    reset_column=1,  # Ready
+                    start_column=2,  # Coding
                     finish_column=5,  # Done
                 )
             )
@@ -272,82 +247,88 @@ class LuskctlBackend(Backend):
 
     def _build_card_description(
         self,
-        meta: LuskctlTaskMeta,
-        container_status: str,
+        task,
+        effective_status: str,
     ) -> str:
         """Build rich description with emoji indicators for a task card."""
         parts: list[str] = []
 
-        # Work status with emoji
-        ws_emoji = _WORK_STATUS_EMOJI.get(meta.work_status or "", "")
-        if container_status == "running":
+        # Work status with emoji from luskctl's WORK_STATUS_DISPLAY
+        ws_info = WORK_STATUS_DISPLAY.get(task.work_status or "")
+        ws_emoji = ws_info.emoji if ws_info else ""
+
+        if effective_status == "running":
             cs_emoji = "\U0001f7e2"
-        elif container_status == "failed":
+        elif effective_status == "failed":
             cs_emoji = "\U0001f534"
         else:
             cs_emoji = "\U0001f7e1"
 
-        if meta.work_status:
+        if task.work_status:
             parts.append(
-                f"{ws_emoji} **{meta.work_status.title()}** | {cs_emoji} {container_status}"
+                f"{ws_emoji} **{task.work_status.title()}** | {cs_emoji} {effective_status}"
             )
         else:
-            parts.append(f"{cs_emoji} {container_status.title()}")
+            parts.append(f"{cs_emoji} {effective_status.title()}")
 
         # Mode/backend/preset metadata
         meta_parts: list[str] = []
-        if meta.mode:
-            meta_parts.append(f"Mode: {meta.mode}")
-        if meta.backend:
-            meta_parts.append(f"Backend: {meta.backend}")
-        if meta.preset:
-            meta_parts.append(f"Preset: {meta.preset}")
+        if task.mode:
+            meta_parts.append(f"Mode: {task.mode}")
+        if task.backend:
+            meta_parts.append(f"Backend: {task.backend}")
+        if task.preset:
+            meta_parts.append(f"Preset: {task.preset}")
         if meta_parts:
             parts.append(" | ".join(meta_parts))
 
         # Stopped column indicators
-        if container_status == "failed" and meta.exit_code is not None:
-            parts.append(f"\u274c Failed (exit code {meta.exit_code})")
-        elif meta.work_status == "blocked":
+        if effective_status == "failed" and task.exit_code is not None:
+            parts.append(f"\u274c Failed (exit code {task.exit_code})")
+        elif task.work_status == "blocked":
             parts.append("\U0001f6a7 Agent reports: blocked")
-            if meta.work_message:
-                parts.append(f"  {meta.work_message}")
-        elif meta.work_status == "error":
-            parts.append("\u26a0\ufe0f Agent reports: error")
-            if meta.work_message:
-                parts.append(f"  {meta.work_message}")
-
-        # Pending phase indicator
-        if meta.pending_phase:
-            parts.append(f"\u23f3 Next phase: {meta.pending_phase.phase.title()}")
+            if task.work_message:
+                parts.append(f"  {task.work_message}")
+        elif task.work_status == "error":
+            parts.append("\U0001f6ab Agent reports: error")
+            if task.work_message:
+                parts.append(f"  {task.work_message}")
 
         return "\n".join(parts)
 
     def _luskctl_to_kanban_task(
         self,
-        meta: LuskctlTaskMeta,
+        task,
         project_id: str,
-        container_states: dict[str, str],
+        effective_status: str,
+        pending_phase: PendingPhase | None,
     ) -> Task:
-        """Convert a luskctl task to a kanban-tui Task."""
-        cs = resolve_task_container_state(project_id, meta, container_states)
-        status = effective_status(cs, meta.mode, meta.exit_code, meta.deleting)
-        column = _resolve_column(status, meta.work_status, meta.mode)
+        """Convert a luskctl TaskMeta to a kanban-tui Task."""
+        column = _resolve_column(effective_status, task.work_status)
 
         # Infer dates from status
         now = datetime.now()
-        start_date = now if status in ("running", "completed") else None
-        finish_date = now if status == "completed" else None
+        start_date = now if effective_status in ("running", "completed") else None
+        finish_date = now if effective_status == "completed" else None
 
         # Map mode to category
-        category = _MODE_TO_CATEGORY.get(meta.mode) if meta.mode else None
+        category = _MODE_TO_CATEGORY.get(task.mode) if task.mode else None
 
         # Build description
-        description = self._build_card_description(meta, status)
+        description = self._build_card_description(task, effective_status)
+
+        # Pending phase indicator
+        if pending_phase:
+            description += f"\n\u23f3 Next phase: {pending_phase.phase.title()}"
+
+        try:
+            task_id = int(task.task_id)
+        except (ValueError, TypeError):
+            task_id = 0
 
         return Task(
-            task_id=int(meta.task_id),
-            title=meta.name or f"task-{meta.task_id}",
+            task_id=task_id,
+            title=task.name or f"task-{task.task_id}",
             column=column,
             creation_date=now,
             start_date=start_date,
@@ -356,12 +337,12 @@ class LuskctlBackend(Backend):
             description=description,
             metadata={
                 "project_id": project_id,
-                "mode": meta.mode,
-                "backend": meta.backend,
-                "preset": meta.preset,
-                "web_port": meta.web_port,
-                "container_status": status,
-                "work_status": meta.work_status,
+                "mode": task.mode,
+                "backend": task.backend,
+                "preset": task.preset,
+                "web_port": task.web_port,
+                "container_status": effective_status,
+                "work_status": task.work_status,
                 "source": "luskctl",
             },
         )
@@ -376,36 +357,50 @@ class LuskctlBackend(Backend):
         if not pid:
             return []
 
-        metas = read_task_metas(pid, self._state_root)
-        if not metas:
+        project = load_project(pid)
+        tasks = get_tasks(pid)
+        if not tasks:
             return []
 
-        container_states = query_container_states(pid)
+        # Batch query container states
+        states = get_all_task_states(pid, tasks)
+
+        # Enrich tasks with live container states
+        for task in tasks:
+            task.container_state = states.get(task.task_id)
 
         # Auto-execute pending phase transitions on stopped tasks
-        for meta in metas:
-            if not meta.pending_phase:
+        for task in tasks:
+            ac_dir = agent_config_dir(project, task.task_id)
+            pp = read_pending_phase(ac_dir)
+            if not pp:
                 continue
-            cs = resolve_task_container_state(pid, meta, container_states)
-            status = effective_status(cs, meta.mode, meta.exit_code, meta.deleting)
-            if status not in ("running",):
+            status = task.status  # uses effective_status() internally
+            if status != "running":
                 # Container is stopped — execute the pending phase
-                ac_dir = self._get_agent_config_dir(pid, meta.task_id)
-                if meta.pending_phase.phase == "done":
+                if pp.phase == "done":
                     write_work_status(ac_dir, "done")
-                elif meta.pending_phase.prompt and meta.mode == "run":
-                    write_work_status(ac_dir, meta.pending_phase.phase)
-                    cli_bridge.task_followup(
-                        pid, meta.task_id, meta.pending_phase.prompt
-                    )
-                clear_pending_phase(ac_dir)
-                # Update meta fields so the card reflects the new state
-                meta.work_status = meta.pending_phase.phase
-                meta.pending_phase = None
+                    clear_pending_phase(ac_dir)
+                elif pp.prompt and task.mode == "run":
+                    write_work_status(ac_dir, pp.phase)
+                    try:
+                        task_followup_headless(
+                            pid, task.task_id, prompt=pp.prompt, follow=False
+                        )
+                        clear_pending_phase(ac_dir)
+                    except SystemExit:
+                        pass  # leave pending-phase.yml for retry on next poll
+                # Update fields so the card reflects the new state
+                task.work_status = pp.phase
 
-        return [
-            self._luskctl_to_kanban_task(m, pid, container_states) for m in metas
-        ]
+        # Build kanban tasks
+        result: list[Task] = []
+        for task in tasks:
+            ac_dir = agent_config_dir(project, task.task_id)
+            pp = read_pending_phase(ac_dir)
+            kanban_task = self._luskctl_to_kanban_task(task, pid, task.status, pp)
+            result.append(kanban_task)
+        return result
 
     def get_task_by_id(self, task_id: int) -> Task | None:
         """Find a single task by ID."""
@@ -436,7 +431,7 @@ class LuskctlBackend(Backend):
                 return cat
         raise NotImplementedError(f"Category {category_id} not found")
 
-    # === Write Operations (via luskctl CLI) ===
+    # === Write Operations (via luskctl library) ===
 
     def create_new_task(
         self,
@@ -446,24 +441,25 @@ class LuskctlBackend(Backend):
         category: int | None = None,
         due_date: datetime | None = None,
     ) -> Task:
-        """Create a new task via luskctl CLI."""
+        """Create a new task via luskctl library."""
         pid = self._active_project_id()
-        task_id_str = cli_bridge.task_new(pid, name=title)
-        if task_id_str is None:
-            raise RuntimeError(
-                "Failed to create task via luskctl CLI. "
-                "Is luskctl installed and on PATH?"
-            )
+        task_id_str = task_new(pid, name=title)
         # Re-read the task from disk
-        task = self.get_task_by_id(int(task_id_str))
+        try:
+            task = self.get_task_by_id(int(task_id_str))
+        except (ValueError, TypeError):
+            task = None
         if task is None:
             raise RuntimeError(f"Task {task_id_str} created but not found in state")
         return task
 
     def delete_task(self, task_id: int):
-        """Delete a task via luskctl CLI."""
+        """Delete a task via luskctl library."""
         pid = self._active_project_id()
-        cli_bridge.task_delete(pid, str(task_id))
+        try:
+            task_delete(pid, str(task_id))
+        except SystemExit:
+            pass
 
     def update_task_status(self, new_task: Task):
         """Handle column changes — trigger development phase transitions.
@@ -492,7 +488,7 @@ class LuskctlBackend(Backend):
         if mode is None:
             return
 
-        agent_config = self._get_agent_config_dir(pid, tid)
+        ac_dir = self._get_agent_config_dir(pid, tid)
 
         if mode in ("cli", "web"):
             # Interactive tasks
@@ -500,7 +496,10 @@ class LuskctlBackend(Backend):
                 return  # Agent controls phase — blocked
             # Stopped interactive: only restart to Coding
             if target_col == 2:
-                cli_bridge.task_restart(pid, tid)
+                try:
+                    task_restart(pid, tid)
+                except SystemExit:
+                    pass
             return
 
         # Autopilot (mode=run) tasks
@@ -508,19 +507,22 @@ class LuskctlBackend(Backend):
             # Deferred: queue pending phase
             phase = _PHASE_WORK_STATUS.get(target_col, "coding")
             if target_col == 5:  # Done
-                write_pending_phase(agent_config, "done", "")
+                write_pending_phase(ac_dir, "done", "")
             else:
                 prompt = _PHASE_PROMPTS.get(target_col, "")
                 if prompt:
-                    write_pending_phase(agent_config, phase, prompt)
+                    write_pending_phase(ac_dir, phase, prompt)
         else:
             # Stopped: execute immediately
             if target_col == 5:  # Done
-                write_work_status(agent_config, "done")
+                write_work_status(ac_dir, "done")
             elif target_col in _PHASE_PROMPTS:
                 prompt = _PHASE_PROMPTS[target_col]
-                write_work_status(agent_config, _PHASE_WORK_STATUS[target_col])
-                cli_bridge.task_followup(pid, tid, prompt)
+                write_work_status(ac_dir, _PHASE_WORK_STATUS[target_col])
+                try:
+                    task_followup_headless(pid, tid, prompt=prompt, follow=False)
+                except SystemExit:
+                    pass
 
     def update_task_entry(
         self,
@@ -530,9 +532,12 @@ class LuskctlBackend(Backend):
         category: int | None,
         due_date: datetime | None,
     ) -> Task | None:
-        """Rename a task via luskctl CLI."""
+        """Rename a task via luskctl library."""
         pid = self._active_project_id()
-        cli_bridge.task_rename(pid, str(task_id), title)
+        try:
+            task_rename(pid, str(task_id), title)
+        except SystemExit:
+            pass
         return self.get_task_by_id(task_id)
 
     # === Not Implemented (projects/columns managed outside kanban-tui) ===
@@ -549,14 +554,10 @@ class LuskctlBackend(Backend):
         )
 
     def delete_board(self, board_id: int):
-        raise NotImplementedError(
-            "luskctl projects cannot be deleted from kanban-tui."
-        )
+        raise NotImplementedError("luskctl projects cannot be deleted from kanban-tui.")
 
     def update_board(self, board_id: int, name: str, icon: str):
-        raise NotImplementedError(
-            "luskctl projects cannot be renamed from kanban-tui."
-        )
+        raise NotImplementedError("luskctl projects cannot be renamed from kanban-tui.")
 
     def create_new_category(self, name: str, color: str) -> Category:
         raise NotImplementedError("luskctl categories are derived from task modes.")
