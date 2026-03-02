@@ -53,8 +53,8 @@ jira = [
 mcp = [
     "pycli-mcp>=0.3.0",
 ]
-luskctl = [
-    "luskctl",
+terok = [
+    "terok",
 ]
 
 

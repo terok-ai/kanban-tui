@@ -24,7 +24,7 @@ class Backends(StrEnum):
     SQLITE = "sqlite"
     JIRA = "jira"
     CLAUDE = "claude"
-    LUSKCTL = "luskctl"
+    TEROK = "terok"
 
 
 class MovementModes(StrEnum):
@@ -67,7 +67,7 @@ class ClaudeBackendSettings(BaseModel):
     active_session_id: str = Field(default="")
 
 
-class LuskctlBackendSettings(BaseModel):
+class TerokBackendSettings(BaseModel):
     active_project_id: str = Field(default="")
     workflow: str = Field(default="standard")
 
@@ -81,8 +81,8 @@ class BackendSettings(BaseModel):
     claude_settings: ClaudeBackendSettings = Field(
         default_factory=ClaudeBackendSettings
     )
-    luskctl_settings: LuskctlBackendSettings = Field(
-        default_factory=LuskctlBackendSettings
+    terok_settings: TerokBackendSettings = Field(
+        default_factory=TerokBackendSettings
     )
 
 
@@ -127,8 +127,8 @@ class Settings(BaseSettings):
         self.backend.claude_settings.active_session_id = new_session_id
         self.save()
 
-    def set_active_luskctl_project(self, new_project_id: str) -> None:
-        self.backend.luskctl_settings.active_project_id = new_project_id
+    def set_active_terok_project(self, new_project_id: str) -> None:
+        self.backend.terok_settings.active_project_id = new_project_id
         self.save()
 
     def set_base_url(self, new_base_url: str) -> None:

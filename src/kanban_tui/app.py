@@ -84,19 +84,19 @@ class KanbanTui(App[str | None]):
                 from kanban_tui.backends.claude.backend import ClaudeBackend
 
                 backend = ClaudeBackend(self.config.backend.claude_settings)
-            case Backends.LUSKCTL:
+            case Backends.TEROK:
                 try:
-                    from kanban_tui.backends.luskctl.backend import LuskctlBackend
+                    from kanban_tui.backends.terok.backend import TerokBackend
                 except ImportError as exc:
                     raise ImportError(
-                        "luskctl backend requires the luskctl package. "
-                        'Install with: uv tool install "kanban-tui[luskctl]"'
+                        "terok backend requires the terok package. "
+                        'Install with: uv tool install "kanban-tui[terok]"'
                     ) from exc
 
-                backend = LuskctlBackend(self.config.backend.luskctl_settings)
+                backend = TerokBackend(self.config.backend.terok_settings)
             case _:
                 raise NotImplementedError(
-                    "Only sqlite, jira, claude, and luskctl backends are supported"
+                    "Only sqlite, jira, claude, and terok backends are supported"
                 )
 
         return backend
@@ -185,18 +185,18 @@ class KanbanTui(App[str | None]):
                     message="Read-only mode: viewing Claude Code tasks from ~/.claude/tasks/",
                     severity="information",
                 )
-            case Backends.LUSKCTL:
+            case Backends.TEROK:
                 try:
-                    from kanban_tui.backends.luskctl.data_reader import (
-                        HAS_LUSKCTL,
+                    from kanban_tui.backends.terok.data_reader import (
+                        HAS_TEROK,
                         list_projects,
                     )
                 except ImportError:
-                    HAS_LUSKCTL = False
-                if not HAS_LUSKCTL:
+                    HAS_TEROK = False
+                if not HAS_TEROK:
                     self.notify(
-                        title="luskctl backend not available",
-                        message='Install with: uv tool install "kanban-tui[luskctl]"',
+                        title="terok backend not available",
+                        message='Install with: uv tool install "kanban-tui[terok]"',
                         severity="warning",
                     )
                     with self.prevent(Select.Changed):
@@ -206,8 +206,8 @@ class KanbanTui(App[str | None]):
                 projects = list_projects()
                 if not projects:
                     self.notify(
-                        title="luskctl backend not available",
-                        message="No luskctl projects found. Create one with 'luskctl project-init'.",
+                        title="terok backend not available",
+                        message="No terok projects found. Create one with 'terok project-init'.",
                         severity="warning",
                     )
                     with self.prevent(Select.Changed):
@@ -216,7 +216,7 @@ class KanbanTui(App[str | None]):
                     return
                 self.config.set_backend(new_backend=backend_value)
                 self.notify(
-                    title="luskctl backend activated",
+                    title="terok backend activated",
                     message=f"Found {len(projects)} project(s).",
                     severity="information",
                 )
@@ -242,8 +242,8 @@ class KanbanTui(App[str | None]):
                     self.config.set_active_claude_session(
                         new_session_id=self.active_board.name
                     )
-                case Backends.LUSKCTL:
-                    self.config.set_active_luskctl_project(
+                case Backends.TEROK:
+                    self.config.set_active_terok_project(
                         new_project_id=self.active_board.name
                     )
                 case Backends.JIRA:

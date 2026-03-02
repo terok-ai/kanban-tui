@@ -1,6 +1,6 @@
-"""Tests for the luskctl kanban-tui backend with development workflow columns.
+"""Tests for the terok kanban-tui backend with development workflow columns.
 
-All luskctl library functions are mocked — tests verify backend logic only.
+All terok library functions are mocked — tests verify backend logic only.
 """
 
 from dataclasses import dataclass, field
@@ -10,14 +10,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from kanban_tui.backends.luskctl.backend import (
-    LuskctlBackend,
+from kanban_tui.backends.terok.backend import (
+    TerokBackend,
     _COLUMNS,
     _PHASE_PROMPTS,
     _resolve_column,
 )
 from kanban_tui.classes.task import Task
-from kanban_tui.config import LuskctlBackendSettings
+from kanban_tui.config import TerokBackendSettings
 
 _NOW = datetime.now()
 
@@ -26,7 +26,7 @@ _NOW = datetime.now()
 # Patch target: the consuming module, not the provider (data_reader).
 # backend.py does `from .data_reader import list_projects`, which creates a
 # local binding.  We must patch where the name is looked up at call time.
-_B = "kanban_tui.backends.luskctl.backend"
+_B = "kanban_tui.backends.terok.backend"
 
 
 def _make_project(pid="myproj", security_class="online", root="/tmp/proj"):
@@ -58,7 +58,7 @@ class _TaskMetaStub:
 
     @property
     def status(self) -> str:
-        """Compute effective status dynamically (mirrors luskctl logic)."""
+        """Compute effective status dynamically (mirrors terok logic)."""
         if self.deleting:
             return "deleting"
         if self.container_state == "running":
@@ -110,8 +110,8 @@ def _make_task_meta(
 
 
 @pytest.fixture
-def mock_luskctl():
-    """Patch all luskctl library functions used by the backend."""
+def mock_terok():
+    """Patch all terok library functions used by the backend."""
     proj = _make_project()
     with (
         patch(f"{_B}.list_projects", return_value=[proj]) as m_list,
@@ -146,10 +146,10 @@ def mock_luskctl():
 
 
 @pytest.fixture
-def backend(mock_luskctl):
+def backend(mock_terok):
     """Create a backend with a single mocked project."""
-    settings = LuskctlBackendSettings(active_project_id="myproj")
-    return LuskctlBackend(settings)
+    settings = TerokBackendSettings(active_project_id="myproj")
+    return TerokBackend(settings)
 
 
 # ---------- Column resolution ----------
@@ -212,24 +212,24 @@ class TestColumnResolution:
 
 
 class TestBoardManagement:
-    def test_get_boards(self, mock_luskctl):
+    def test_get_boards(self, mock_terok):
         proj_a = _make_project("alpha", root="/tmp/alpha")
         proj_b = _make_project("beta", root="/tmp/beta")
-        mock_luskctl["list_projects"].return_value = [proj_a, proj_b]
+        mock_terok["list_projects"].return_value = [proj_a, proj_b]
 
-        settings = LuskctlBackendSettings()
-        be = LuskctlBackend(settings)
+        settings = TerokBackendSettings()
+        be = TerokBackend(settings)
         boards = be.get_boards()
         assert len(boards) == 2
         assert boards[0].name == "alpha"
         assert boards[1].name == "beta"
 
-    def test_gatekeeping_icon(self, mock_luskctl):
+    def test_gatekeeping_icon(self, mock_terok):
         proj = _make_project("secure", security_class="gatekeeping")
-        mock_luskctl["list_projects"].return_value = [proj]
+        mock_terok["list_projects"].return_value = [proj]
 
-        settings = LuskctlBackendSettings()
-        be = LuskctlBackend(settings)
+        settings = TerokBackendSettings()
+        be = TerokBackend(settings)
         boards = be.get_boards()
         assert boards[0].icon == "\U0001f512"
 
@@ -237,36 +237,36 @@ class TestBoardManagement:
         board = backend.active_board
         assert board.name == "myproj"
 
-    def test_active_board_fallback_to_first(self, mock_luskctl):
+    def test_active_board_fallback_to_first(self, mock_terok):
         proj = _make_project("first")
-        mock_luskctl["list_projects"].return_value = [proj]
+        mock_terok["list_projects"].return_value = [proj]
 
-        settings = LuskctlBackendSettings(active_project_id="nonexistent")
-        be = LuskctlBackend(settings)
+        settings = TerokBackendSettings(active_project_id="nonexistent")
+        be = TerokBackend(settings)
         board = be.active_board
         assert board.name == "first"
 
-    def test_stale_active_project_fallback_used_for_create(self, mock_luskctl):
+    def test_stale_active_project_fallback_used_for_create(self, mock_terok):
         proj = _make_project("first")
-        mock_luskctl["list_projects"].return_value = [proj]
-        be = LuskctlBackend(LuskctlBackendSettings(active_project_id="nonexistent"))
+        mock_terok["list_projects"].return_value = [proj]
+        be = TerokBackend(TerokBackendSettings(active_project_id="nonexistent"))
 
-        mock_luskctl["task_new"].return_value = "42"
-        mock_luskctl["get_tasks"].return_value = [_make_task_meta("42", mode=None)]
+        mock_terok["task_new"].return_value = "42"
+        mock_terok["get_tasks"].return_value = [_make_task_meta("42", mode=None)]
 
         be.create_new_task("my-task", "desc", column=1)
-        mock_luskctl["task_new"].assert_called_once_with("first", name="my-task")
+        mock_terok["task_new"].assert_called_once_with("first", name="my-task")
 
-    def test_no_projects_raises(self, mock_luskctl):
-        mock_luskctl["list_projects"].return_value = []
+    def test_no_projects_raises(self, mock_terok):
+        mock_terok["list_projects"].return_value = []
 
-        settings = LuskctlBackendSettings()
-        be = LuskctlBackend(settings)
-        with pytest.raises(RuntimeError, match="No luskctl projects found"):
+        settings = TerokBackendSettings()
+        be = TerokBackend(settings)
+        with pytest.raises(RuntimeError, match="No terok projects found"):
             _ = be.active_board
 
-    def test_board_infos(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_board_infos(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1"),
             _make_task_meta("2"),
         ]
@@ -276,12 +276,12 @@ class TestBoardManagement:
         assert infos[0]["amount_tasks"] == 2
         assert infos[0]["amount_columns"] == len(_COLUMNS)
 
-    def test_board_infos_is_read_only(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [_make_task_meta("1")]
+    def test_board_infos_is_read_only(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [_make_task_meta("1")]
         backend.get_board_infos()
-        mock_luskctl["get_all_task_states"].assert_not_called()
-        mock_luskctl["read_pending_phase"].assert_not_called()
-        mock_luskctl["write_work_status"].assert_not_called()
+        mock_terok["get_all_task_states"].assert_not_called()
+        mock_terok["read_pending_phase"].assert_not_called()
+        mock_terok["write_work_status"].assert_not_called()
 
     def test_board_markers(self, backend):
         board = backend.active_board
@@ -313,8 +313,8 @@ class TestColumnManagement:
 
 
 class TestTaskManagement:
-    def test_get_tasks_on_active_board(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_get_tasks_on_active_board(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1", mode=None),
             _make_task_meta("2", mode="cli", exit_code=0),
             _make_task_meta("3", mode="run", preset="solo"),
@@ -322,71 +322,71 @@ class TestTaskManagement:
         tasks = backend.get_tasks_on_active_board()
         assert len(tasks) == 3
 
-    def test_created_task_in_ready_column(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_created_task_in_ready_column(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1", mode=None),
         ]
         tasks = backend.get_tasks_on_active_board()
         assert tasks[0].column == 1
 
-    def test_completed_task_in_done_column(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_completed_task_in_done_column(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("2", mode="cli", exit_code=0),
         ]
         tasks = backend.get_tasks_on_active_board()
         assert tasks[0].column == 5
 
-    def test_not_found_task_in_stopped_column(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_not_found_task_in_stopped_column(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("3", mode="run", preset="solo"),
         ]
         tasks = backend.get_tasks_on_active_board()
         assert tasks[0].column == 6
 
-    def test_task_metadata_includes_container_status(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_task_metadata_includes_container_status(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("3", mode="run", preset="solo"),
         ]
         tasks = backend.get_tasks_on_active_board()
         assert tasks[0].metadata["project_id"] == "myproj"
         assert tasks[0].metadata["mode"] == "run"
         assert tasks[0].metadata["preset"] == "solo"
-        assert tasks[0].metadata["source"] == "luskctl"
+        assert tasks[0].metadata["source"] == "terok"
         assert tasks[0].metadata["container_status"] == "not found"
 
     def test_missing_state_entry_preserves_existing_container_state(
-        self, backend, mock_luskctl
+        self, backend, mock_terok
     ):
         meta = _make_task_meta("1", mode="run", container_state="running")
-        mock_luskctl["get_tasks"].return_value = [meta]
-        mock_luskctl["get_all_task_states"].return_value = {}  # missing key
+        mock_terok["get_tasks"].return_value = [meta]
+        mock_terok["get_all_task_states"].return_value = {}  # missing key
 
         tasks = backend.get_tasks_on_active_board()
         assert len(tasks) == 1
         assert tasks[0].metadata["container_status"] == "running"
         assert tasks[0].column == 2  # running defaults to Coding
 
-    def test_task_title_from_name(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_task_title_from_name(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1", mode=None, name="happy-hawk"),
         ]
         tasks = backend.get_tasks_on_active_board()
         assert tasks[0].title == "happy-hawk"
 
-    def test_get_task_by_id(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_get_task_by_id(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("2", mode="cli", exit_code=0),
         ]
         task = backend.get_task_by_id(2)
         assert task is not None
         assert task.task_id == 2
 
-    def test_get_task_by_id_nonexistent(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = []
+    def test_get_task_by_id_nonexistent(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = []
         assert backend.get_task_by_id(999) is None
 
-    def test_get_tasks_by_ids(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_get_tasks_by_ids(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1", mode=None),
             _make_task_meta("2", mode="cli", exit_code=0),
             _make_task_meta("3", mode="run"),
@@ -396,14 +396,14 @@ class TestTaskManagement:
         ids = {t.task_id for t in tasks}
         assert ids == {1, 3}
 
-    def test_empty_project_returns_no_tasks(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = []
+    def test_empty_project_returns_no_tasks(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = []
         assert backend.get_tasks_on_active_board() == []
 
-    def test_malformed_task_id_skipped(self, backend, mock_luskctl):
+    def test_malformed_task_id_skipped(self, backend, mock_terok):
         """int(meta.task_id) ValueError is handled gracefully."""
         meta = _make_task_meta("abc", mode=None)
-        mock_luskctl["get_tasks"].return_value = [meta]
+        mock_terok["get_tasks"].return_value = [meta]
         tasks = backend.get_tasks_on_active_board()
         # task_id=0 for non-numeric IDs
         assert len(tasks) == 1
@@ -414,8 +414,8 @@ class TestTaskManagement:
 
 
 class TestWorkStatusInCards:
-    def test_work_status_in_metadata(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_work_status_in_metadata(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1", mode="run", work_status="testing"),
         ]
         tasks = backend.get_tasks_on_active_board()
@@ -426,15 +426,15 @@ class TestWorkStatusInCards:
 
 
 class TestCardDescriptions:
-    def test_stopped_task_shows_status(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_stopped_task_shows_status(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1", mode="run", exit_code=1),
         ]
         tasks = backend.get_tasks_on_active_board()
         assert "Failed (exit code 1)" in tasks[0].description
 
-    def test_blocked_indicator(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_blocked_indicator(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta(
                 "1", mode="run", work_status="blocked", work_message="Need API key"
             ),
@@ -443,9 +443,9 @@ class TestCardDescriptions:
         assert "Agent reports: blocked" in tasks[0].description
         assert "Need API key" in tasks[0].description
 
-    def test_error_uses_prohibited_emoji(self, backend, mock_luskctl):
+    def test_error_uses_prohibited_emoji(self, backend, mock_terok):
         """Error status uses U+1F6AB (prohibited) not VS16 sequence."""
-        mock_luskctl["get_tasks"].return_value = [
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1", mode="run", work_status="error", work_message="Oops"),
         ]
         tasks = backend.get_tasks_on_active_board()
@@ -453,8 +453,8 @@ class TestCardDescriptions:
         # Must NOT contain VS16 (U+FE0F)
         assert "\ufe0f" not in tasks[0].description
 
-    def test_mode_category_mapping(self, backend, mock_luskctl):
-        mock_luskctl["get_tasks"].return_value = [
+    def test_mode_category_mapping(self, backend, mock_terok):
+        mock_terok["get_tasks"].return_value = [
             _make_task_meta("1", mode="cli"),
             _make_task_meta("2", mode="web"),
             _make_task_meta("3", mode="run"),
@@ -472,7 +472,7 @@ class TestCardDescriptions:
 
 
 class TestDeferredPhaseTransition:
-    def test_running_autopilot_writes_pending_phase(self, backend, mock_luskctl):
+    def test_running_autopilot_writes_pending_phase(self, backend, mock_terok):
         task = Task(
             task_id=1,
             title="task-1",
@@ -485,12 +485,12 @@ class TestDeferredPhaseTransition:
             },
         )
         backend.update_task_status(task)
-        mock_luskctl["write_pending_phase"].assert_called_once()
-        call_args = mock_luskctl["write_pending_phase"].call_args
+        mock_terok["write_pending_phase"].assert_called_once()
+        call_args = mock_terok["write_pending_phase"].call_args
         assert call_args[0][1] == "testing"
         assert call_args[0][2] == _PHASE_PROMPTS[3]
 
-    def test_running_autopilot_done_writes_pending_done(self, backend, mock_luskctl):
+    def test_running_autopilot_done_writes_pending_done(self, backend, mock_terok):
         task = Task(
             task_id=1,
             title="task-1",
@@ -503,8 +503,8 @@ class TestDeferredPhaseTransition:
             },
         )
         backend.update_task_status(task)
-        mock_luskctl["write_pending_phase"].assert_called_once()
-        call_args = mock_luskctl["write_pending_phase"].call_args
+        mock_terok["write_pending_phase"].assert_called_once()
+        call_args = mock_terok["write_pending_phase"].call_args
         assert call_args[0][1] == "done"
 
 
@@ -512,7 +512,7 @@ class TestDeferredPhaseTransition:
 
 
 class TestImmediatePhaseTransition:
-    def test_stopped_autopilot_calls_followup(self, backend, mock_luskctl):
+    def test_stopped_autopilot_calls_followup(self, backend, mock_terok):
         task = Task(
             task_id=1,
             title="task-1",
@@ -526,13 +526,13 @@ class TestImmediatePhaseTransition:
         )
         backend.update_task_status(task)
 
-        mock_luskctl["task_followup_headless"].assert_called_once_with(
+        mock_terok["task_followup_headless"].assert_called_once_with(
             "myproj", "1", prompt=_PHASE_PROMPTS[3], follow=False
         )
-        mock_luskctl["write_work_status"].assert_called_once()
+        mock_terok["write_work_status"].assert_called_once()
 
     def test_stopped_interactive_restart_system_exit_raises_runtime_error(
-        self, backend, mock_luskctl
+        self, backend, mock_terok
     ):
         task = Task(
             task_id=1,
@@ -545,12 +545,12 @@ class TestImmediatePhaseTransition:
                 "container_status": "stopped",
             },
         )
-        mock_luskctl["task_restart"].side_effect = SystemExit(1)
+        mock_terok["task_restart"].side_effect = SystemExit(1)
         with pytest.raises(RuntimeError, match="Failed to restart task 1"):
             backend.update_task_status(task)
 
     def test_stopped_autopilot_followup_system_exit_raises_runtime_error(
-        self, backend, mock_luskctl
+        self, backend, mock_terok
     ):
         task = Task(
             task_id=1,
@@ -563,11 +563,11 @@ class TestImmediatePhaseTransition:
                 "container_status": "stopped",
             },
         )
-        mock_luskctl["task_followup_headless"].side_effect = SystemExit(1)
+        mock_terok["task_followup_headless"].side_effect = SystemExit(1)
         with pytest.raises(RuntimeError, match="Failed to run follow-up for task 1"):
             backend.update_task_status(task)
 
-    def test_stopped_autopilot_done_writes_status(self, backend, mock_luskctl):
+    def test_stopped_autopilot_done_writes_status(self, backend, mock_terok):
         task = Task(
             task_id=1,
             title="task-1",
@@ -580,8 +580,8 @@ class TestImmediatePhaseTransition:
             },
         )
         backend.update_task_status(task)
-        mock_luskctl["write_work_status"].assert_called_once()
-        call_args = mock_luskctl["write_work_status"].call_args
+        mock_terok["write_work_status"].assert_called_once()
+        call_args = mock_terok["write_work_status"].call_args
         assert call_args[0][1] == "done"
 
 
@@ -589,60 +589,60 @@ class TestImmediatePhaseTransition:
 
 
 class TestPendingPhaseAutoExecution:
-    def test_stopped_with_pending_triggers_followup(self, backend, mock_luskctl):
+    def test_stopped_with_pending_triggers_followup(self, backend, mock_terok):
         pp = MagicMock()
         pp.phase = "testing"
         pp.prompt = "Run tests"
 
         task_meta = _make_task_meta("1", mode="run")
-        mock_luskctl["get_tasks"].return_value = [task_meta]
-        mock_luskctl["read_pending_phase"].return_value = pp
+        mock_terok["get_tasks"].return_value = [task_meta]
+        mock_terok["read_pending_phase"].return_value = pp
 
         tasks = backend.get_tasks_on_active_board()
         assert len(tasks) == 1
 
-        mock_luskctl["task_followup_headless"].assert_called_once()
-        mock_luskctl["clear_pending_phase"].assert_called_once()
+        mock_terok["task_followup_headless"].assert_called_once()
+        mock_terok["clear_pending_phase"].assert_called_once()
 
-    def test_stopped_with_pending_done_writes_status(self, backend, mock_luskctl):
+    def test_stopped_with_pending_done_writes_status(self, backend, mock_terok):
         pp = MagicMock()
         pp.phase = "done"
         pp.prompt = ""
 
         task_meta = _make_task_meta("1", mode="run")
-        mock_luskctl["get_tasks"].return_value = [task_meta]
-        mock_luskctl["read_pending_phase"].return_value = pp
+        mock_terok["get_tasks"].return_value = [task_meta]
+        mock_terok["read_pending_phase"].return_value = pp
 
         tasks = backend.get_tasks_on_active_board()
         assert len(tasks) == 1
 
-        mock_luskctl["write_work_status"].assert_called()
+        mock_terok["write_work_status"].assert_called()
 
-    def test_pending_phase_failure_leaves_file(self, backend, mock_luskctl):
+    def test_pending_phase_failure_leaves_file(self, backend, mock_terok):
         """Regression: pending-phase.yml should NOT be cleared when followup fails."""
         pp = MagicMock()
         pp.phase = "testing"
         pp.prompt = "Run tests"
 
         task_meta = _make_task_meta("1", mode="run")
-        mock_luskctl["get_tasks"].return_value = [task_meta]
-        mock_luskctl["read_pending_phase"].return_value = pp
-        mock_luskctl["task_followup_headless"].side_effect = SystemExit(1)
+        mock_terok["get_tasks"].return_value = [task_meta]
+        mock_terok["read_pending_phase"].return_value = pp
+        mock_terok["task_followup_headless"].side_effect = SystemExit(1)
 
         tasks = backend.get_tasks_on_active_board()
         assert len(tasks) == 1
 
         # followup was attempted
-        mock_luskctl["task_followup_headless"].assert_called_once()
+        mock_terok["task_followup_headless"].assert_called_once()
         # pending phase was NOT cleared (failure path)
-        mock_luskctl["clear_pending_phase"].assert_not_called()
+        mock_terok["clear_pending_phase"].assert_not_called()
 
 
 # ---------- Interactive task blocking ----------
 
 
 class TestInteractiveTaskBlocking:
-    def test_running_interactive_all_moves_blocked(self, backend, mock_luskctl):
+    def test_running_interactive_all_moves_blocked(self, backend, mock_terok):
         task = Task(
             task_id=1,
             title="task-1",
@@ -656,10 +656,10 @@ class TestInteractiveTaskBlocking:
         )
         backend.update_task_status(task)
         # No writes should have been made
-        mock_luskctl["write_pending_phase"].assert_not_called()
-        mock_luskctl["write_work_status"].assert_not_called()
+        mock_terok["write_pending_phase"].assert_not_called()
+        mock_terok["write_work_status"].assert_not_called()
 
-    def test_stopped_interactive_restart_to_coding(self, backend, mock_luskctl):
+    def test_stopped_interactive_restart_to_coding(self, backend, mock_terok):
         task = Task(
             task_id=1,
             title="task-1",
@@ -672,14 +672,14 @@ class TestInteractiveTaskBlocking:
             },
         )
         backend.update_task_status(task)
-        mock_luskctl["task_restart"].assert_called_once_with("myproj", "1")
+        mock_terok["task_restart"].assert_called_once_with("myproj", "1")
 
 
 # ---------- Unstarted task blocking ----------
 
 
 class TestUnstartedTaskBlocking:
-    def test_unstarted_all_moves_blocked(self, backend, mock_luskctl):
+    def test_unstarted_all_moves_blocked(self, backend, mock_terok):
         for target_col in (2, 3, 4, 5):
             task = Task(
                 task_id=1,
@@ -694,16 +694,16 @@ class TestUnstartedTaskBlocking:
             )
             backend.update_task_status(task)
         # No writes should have been made
-        mock_luskctl["write_pending_phase"].assert_not_called()
-        mock_luskctl["write_work_status"].assert_not_called()
-        mock_luskctl["task_followup_headless"].assert_not_called()
+        mock_terok["write_pending_phase"].assert_not_called()
+        mock_terok["write_work_status"].assert_not_called()
+        mock_terok["task_followup_headless"].assert_not_called()
 
 
 # ---------- Invalid move blocking ----------
 
 
 class TestInvalidMoveBlocking:
-    def test_move_to_ready_blocked(self, backend, mock_luskctl):
+    def test_move_to_ready_blocked(self, backend, mock_terok):
         task = Task(
             task_id=1,
             title="task-1",
@@ -716,9 +716,9 @@ class TestInvalidMoveBlocking:
             },
         )
         backend.update_task_status(task)
-        mock_luskctl["write_pending_phase"].assert_not_called()
+        mock_terok["write_pending_phase"].assert_not_called()
 
-    def test_move_to_stopped_blocked(self, backend, mock_luskctl):
+    def test_move_to_stopped_blocked(self, backend, mock_terok):
         task = Task(
             task_id=1,
             title="task-1",
@@ -731,49 +731,49 @@ class TestInvalidMoveBlocking:
             },
         )
         backend.update_task_status(task)
-        mock_luskctl["write_pending_phase"].assert_not_called()
+        mock_terok["write_pending_phase"].assert_not_called()
 
 
 # ---------- Write operations ----------
 
 
 class TestWriteOperations:
-    def test_create_new_task(self, backend, mock_luskctl):
+    def test_create_new_task(self, backend, mock_terok):
         # After task_new returns "42", get_tasks should return the new task
         new_meta = _make_task_meta("42", mode=None, name="my-task")
-        mock_luskctl["get_tasks"].return_value = [new_meta]
+        mock_terok["get_tasks"].return_value = [new_meta]
 
         task = backend.create_new_task("my-task", "desc", column=1)
-        mock_luskctl["task_new"].assert_called_once_with("myproj", name="my-task")
+        mock_terok["task_new"].assert_called_once_with("myproj", name="my-task")
         assert task.task_id == 42
 
     def test_create_new_task_system_exit_raises_runtime_error(
-        self, backend, mock_luskctl
+        self, backend, mock_terok
     ):
-        mock_luskctl["task_new"].side_effect = SystemExit(1)
+        mock_terok["task_new"].side_effect = SystemExit(1)
         with pytest.raises(RuntimeError, match="Failed to create task"):
             backend.create_new_task("my-task", "desc", column=1)
 
-    def test_delete_task(self, backend, mock_luskctl):
+    def test_delete_task(self, backend, mock_terok):
         backend.delete_task(1)
-        mock_luskctl["task_delete"].assert_called_once_with("myproj", "1")
+        mock_terok["task_delete"].assert_called_once_with("myproj", "1")
 
-    def test_delete_task_system_exit_raises_runtime_error(self, backend, mock_luskctl):
-        mock_luskctl["task_delete"].side_effect = SystemExit(1)
+    def test_delete_task_system_exit_raises_runtime_error(self, backend, mock_terok):
+        mock_terok["task_delete"].side_effect = SystemExit(1)
         with pytest.raises(RuntimeError, match="Failed to delete task 1"):
             backend.delete_task(1)
 
-    def test_update_task_entry_renames(self, backend, mock_luskctl):
+    def test_update_task_entry_renames(self, backend, mock_terok):
         meta = _make_task_meta("1", name="new-name", mode=None)
-        mock_luskctl["get_tasks"].return_value = [meta]
+        mock_terok["get_tasks"].return_value = [meta]
 
         backend.update_task_entry(1, "new-name", "desc", None, None)
-        mock_luskctl["task_rename"].assert_called_once_with("myproj", "1", "new-name")
+        mock_terok["task_rename"].assert_called_once_with("myproj", "1", "new-name")
 
     def test_update_task_entry_system_exit_raises_runtime_error(
-        self, backend, mock_luskctl
+        self, backend, mock_terok
     ):
-        mock_luskctl["task_rename"].side_effect = SystemExit(1)
+        mock_terok["task_rename"].side_effect = SystemExit(1)
         with pytest.raises(RuntimeError, match="Failed to rename task 1"):
             backend.update_task_entry(1, "new-name", "desc", None, None)
 

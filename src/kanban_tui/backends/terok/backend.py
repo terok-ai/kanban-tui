@@ -1,11 +1,11 @@
-"""kanban-tui backend for luskctl container orchestration.
+"""kanban-tui backend for terok container orchestration.
 
-Maps luskctl concepts to kanban-tui models with development workflow columns:
-- Projects  -> Boards   (one board per luskctl project)
+Maps terok concepts to kanban-tui models with development workflow columns:
+- Projects  -> Boards   (one board per terok project)
 - Dev phases -> Columns  (Ready / Coding / Testing / Review / Done / Stopped)
 - Tasks     -> Cards     (with live container state + agent work status)
 
-All reads and writes go through the luskctl Python library.
+All reads and writes go through the terok Python library.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from kanban_tui.classes.board import Board
 from kanban_tui.classes.category import Category
 from kanban_tui.classes.column import Column
 from kanban_tui.classes.task import Task
-from kanban_tui.config import LuskctlBackendSettings
+from kanban_tui.config import TerokBackendSettings
 
 from .data_reader import (
     WORK_STATUS_DISPLAY,
@@ -118,13 +118,13 @@ def _resolve_column(effective_status: str, work_status: str | None) -> int:
 
 
 @dataclass
-class LuskctlBackend(Backend):
-    """Backend mapping luskctl tasks to development workflow columns.
+class TerokBackend(Backend):
+    """Backend mapping terok tasks to development workflow columns.
 
-    Uses the luskctl Python library for all reads and writes.
+    Uses the terok Python library for all reads and writes.
     """
 
-    settings: LuskctlBackendSettings
+    settings: TerokBackendSettings
 
     # Internal caches — rebuilt on each get_boards() / get_tasks*() call.
     _project_id_to_board_id: dict[str, int] = field(default_factory=dict, repr=False)
@@ -134,7 +134,7 @@ class LuskctlBackend(Backend):
         self._refresh_projects()
 
     def _refresh_projects(self):
-        """Discover projects via luskctl library and rebuild ID mappings."""
+        """Discover projects via terok library and rebuild ID mappings."""
         self._projects = list_projects()
         self._project_id_to_board_id = {}
         self._board_id_to_project_id = {}
@@ -169,7 +169,7 @@ class LuskctlBackend(Backend):
     # === Board Management ===
 
     def get_boards(self) -> list[Board]:
-        """Return one board per luskctl project."""
+        """Return one board per terok project."""
         self._refresh_projects()
         boards: list[Board] = []
         for proj in self._projects:
@@ -198,7 +198,7 @@ class LuskctlBackend(Backend):
         """Return the active board (project)."""
         boards = self.get_boards()
         if not boards:
-            raise RuntimeError("No luskctl projects found")
+            raise RuntimeError("No terok projects found")
         active_pid = self._active_project_id()
         for board in boards:
             if board.name == active_pid:
@@ -258,7 +258,7 @@ class LuskctlBackend(Backend):
         """Build rich description with emoji indicators for a task card."""
         parts: list[str] = []
 
-        # Work status with emoji from luskctl's WORK_STATUS_DISPLAY
+        # Work status with emoji from terok's WORK_STATUS_DISPLAY
         ws_info = WORK_STATUS_DISPLAY.get(task.work_status or "")
         ws_emoji = ws_info.emoji if ws_info else ""
 
@@ -301,14 +301,14 @@ class LuskctlBackend(Backend):
 
         return "\n".join(parts)
 
-    def _luskctl_to_kanban_task(
+    def _terok_to_kanban_task(
         self,
         task,
         project_id: str,
         effective_status: str,
         pending_phase: PendingPhase | None,
     ) -> Task:
-        """Convert a luskctl TaskMeta to a kanban-tui Task."""
+        """Convert a terok TaskMeta to a kanban-tui Task."""
         column = _resolve_column(effective_status, task.work_status)
 
         # Infer dates from status
@@ -348,7 +348,7 @@ class LuskctlBackend(Backend):
                 "web_port": task.web_port,
                 "container_status": effective_status,
                 "work_status": task.work_status,
-                "source": "luskctl",
+                "source": "terok",
             },
         )
 
@@ -409,7 +409,7 @@ class LuskctlBackend(Backend):
         for task in tasks:
             ac_dir = agent_config_dir(project, task.task_id)
             pp = read_pending_phase(ac_dir)
-            kanban_task = self._luskctl_to_kanban_task(task, pid, task.status, pp)
+            kanban_task = self._terok_to_kanban_task(task, pid, task.status, pp)
             result.append(kanban_task)
         return result
 
@@ -442,7 +442,7 @@ class LuskctlBackend(Backend):
                 return cat
         raise NotImplementedError(f"Category {category_id} not found")
 
-    # === Write Operations (via luskctl library) ===
+    # === Write Operations (via terok library) ===
 
     def create_new_task(
         self,
@@ -452,14 +452,14 @@ class LuskctlBackend(Backend):
         category: int | None = None,
         due_date: datetime | None = None,
     ) -> Task:
-        """Create a new task via luskctl library.
+        """Create a new task via terok library.
 
         Note: description, category, and due_date are accepted for interface
-        compatibility but not supported by luskctl (title-only creation).
+        compatibility but not supported by terok (title-only creation).
         """
         if description or category is not None or due_date is not None:
             logger.debug(
-                "luskctl backend ignores description/category/due_date in create_new_task"
+                "terok backend ignores description/category/due_date in create_new_task"
             )
         pid = self._require_writable_project_id()
         try:
@@ -481,11 +481,11 @@ class LuskctlBackend(Backend):
         """Return the active project ID, raising if unavailable."""
         pid = self._active_project_id()
         if not pid:
-            raise RuntimeError("No luskctl project available for write operation")
+            raise RuntimeError("No terok project available for write operation")
         return pid
 
     def delete_task(self, task_id: int):
-        """Delete a task via luskctl library."""
+        """Delete a task via terok library."""
         pid = self._require_writable_project_id()
         try:
             task_delete(pid, str(task_id))
@@ -569,14 +569,14 @@ class LuskctlBackend(Backend):
         category: int | None,
         due_date: datetime | None,
     ) -> Task | None:
-        """Rename a task via luskctl library.
+        """Rename a task via terok library.
 
         Note: description, category, and due_date are accepted for interface
-        compatibility but not supported by luskctl (title-only updates).
+        compatibility but not supported by terok (title-only updates).
         """
         if description or category is not None or due_date is not None:
             logger.debug(
-                "luskctl backend ignores description/category/due_date in update_task_entry"
+                "terok backend ignores description/category/due_date in update_task_entry"
             )
         pid = self._require_writable_project_id()
         try:
@@ -594,36 +594,36 @@ class LuskctlBackend(Backend):
         column_dict: dict[str, bool] | None = None,
     ) -> Board:
         raise NotImplementedError(
-            "luskctl projects are managed outside kanban-tui. "
-            "Use 'luskctl project-init' to create projects."
+            "terok projects are managed outside kanban-tui. "
+            "Use 'terok project-init' to create projects."
         )
 
     def delete_board(self, board_id: int):
-        raise NotImplementedError("luskctl projects cannot be deleted from kanban-tui.")
+        raise NotImplementedError("terok projects cannot be deleted from kanban-tui.")
 
     def update_board(self, board_id: int, name: str, icon: str):
-        raise NotImplementedError("luskctl projects cannot be renamed from kanban-tui.")
+        raise NotImplementedError("terok projects cannot be renamed from kanban-tui.")
 
     def create_new_category(self, name: str, color: str) -> Category:
-        raise NotImplementedError("luskctl categories are derived from task modes.")
+        raise NotImplementedError("terok categories are derived from task modes.")
 
     def update_category(self, category_id: int, name: str, color: str) -> Category:
-        raise NotImplementedError("luskctl categories are derived from task modes.")
+        raise NotImplementedError("terok categories are derived from task modes.")
 
     def delete_category(self, category_id: int):
-        raise NotImplementedError("luskctl categories are derived from task modes.")
+        raise NotImplementedError("terok categories are derived from task modes.")
 
     def update_column_visibility(self, column_id: int, visible: bool):
-        raise NotImplementedError("luskctl status columns are fixed.")
+        raise NotImplementedError("terok status columns are fixed.")
 
     def update_column_name(self, column_id: int, new_name: str):
-        raise NotImplementedError("luskctl status columns are fixed.")
+        raise NotImplementedError("terok status columns are fixed.")
 
     def create_task_dependency(self, task_id: int, depends_on_task_id: int) -> int:
-        raise NotImplementedError("luskctl does not support task dependencies.")
+        raise NotImplementedError("terok does not support task dependencies.")
 
     def delete_task_dependency(self, task_id: int, depends_on_task_id: int) -> int:
-        raise NotImplementedError("luskctl does not support task dependencies.")
+        raise NotImplementedError("terok does not support task dependencies.")
 
     def would_create_dependency_cycle(
         self, task_id: int, depends_on_task_id: int
