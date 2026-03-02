@@ -454,7 +454,12 @@ class LuskctlBackend(Backend):
     ) -> Task:
         """Create a new task via luskctl library."""
         pid = self._require_writable_project_id()
-        task_id_str = task_new(pid, name=title)
+        try:
+            task_id_str = task_new(pid, name=title)
+        except SystemExit as exc:
+            raise RuntimeError(
+                f"Failed to create task '{title}' in project {pid}"
+            ) from exc
         # Re-read the task from disk
         try:
             task = self.get_task_by_id(int(task_id_str))

@@ -727,6 +727,13 @@ class TestWriteOperations:
         mock_luskctl["task_new"].assert_called_once_with("myproj", name="my-task")
         assert task.task_id == 42
 
+    def test_create_new_task_system_exit_raises_runtime_error(
+        self, backend, mock_luskctl
+    ):
+        mock_luskctl["task_new"].side_effect = SystemExit(1)
+        with pytest.raises(RuntimeError, match="Failed to create task"):
+            backend.create_new_task("my-task", "desc", column=1)
+
     def test_delete_task(self, backend, mock_luskctl):
         backend.delete_task(1)
         mock_luskctl["task_delete"].assert_called_once_with("myproj", "1")
