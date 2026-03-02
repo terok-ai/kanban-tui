@@ -14,8 +14,6 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
-logger = logging.getLogger(__name__)
-
 from kanban_tui.backends.base import Backend
 from kanban_tui.classes.board import Board
 from kanban_tui.classes.category import Category
@@ -41,6 +39,8 @@ from .data_reader import (
     write_pending_phase,
     write_work_status,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------- Column definitions (6-column development workflow) ----------
 
@@ -452,7 +452,15 @@ class LuskctlBackend(Backend):
         category: int | None = None,
         due_date: datetime | None = None,
     ) -> Task:
-        """Create a new task via luskctl library."""
+        """Create a new task via luskctl library.
+
+        Note: description, category, and due_date are accepted for interface
+        compatibility but not supported by luskctl (title-only creation).
+        """
+        if description or category is not None or due_date is not None:
+            logger.debug(
+                "luskctl backend ignores description/category/due_date in create_new_task"
+            )
         pid = self._require_writable_project_id()
         try:
             task_id_str = task_new(pid, name=title)
@@ -561,7 +569,15 @@ class LuskctlBackend(Backend):
         category: int | None,
         due_date: datetime | None,
     ) -> Task | None:
-        """Rename a task via luskctl library."""
+        """Rename a task via luskctl library.
+
+        Note: description, category, and due_date are accepted for interface
+        compatibility but not supported by luskctl (title-only updates).
+        """
+        if description or category is not None or due_date is not None:
+            logger.debug(
+                "luskctl backend ignores description/category/due_date in update_task_entry"
+            )
         pid = self._require_writable_project_id()
         try:
             task_rename(pid, str(task_id), title)
