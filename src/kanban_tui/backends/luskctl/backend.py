@@ -368,7 +368,7 @@ class LuskctlBackend(Backend):
 
         # Enrich tasks with live container states
         for task in tasks:
-            task.container_state = states.get(task.task_id)
+            task.container_state = states.get(task.task_id, task.container_state)
 
         # Auto-execute pending phase transitions on stopped tasks
         for task in tasks:
@@ -444,6 +444,8 @@ class LuskctlBackend(Backend):
     ) -> Task:
         """Create a new task via luskctl library."""
         pid = self._active_project_id()
+        if not pid:
+            raise RuntimeError("No luskctl project available for write operation")
         task_id_str = task_new(pid, name=title)
         # Re-read the task from disk
         try:

@@ -327,6 +327,18 @@ class TestTaskManagement:
         assert tasks[0].metadata["source"] == "luskctl"
         assert tasks[0].metadata["container_status"] == "not found"
 
+    def test_missing_state_entry_preserves_existing_container_state(
+        self, backend, mock_luskctl
+    ):
+        meta = _make_task_meta("1", mode="run", container_state="running")
+        mock_luskctl["get_tasks"].return_value = [meta]
+        mock_luskctl["get_all_task_states"].return_value = {}  # missing key
+
+        tasks = backend.get_tasks_on_active_board()
+        assert len(tasks) == 1
+        assert tasks[0].metadata["container_status"] == "running"
+        assert tasks[0].column == 2  # running defaults to Coding
+
     def test_task_title_from_name(self, backend, mock_luskctl):
         mock_luskctl["get_tasks"].return_value = [
             _make_task_meta("1", mode=None, name="happy-hawk"),
