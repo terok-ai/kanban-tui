@@ -53,6 +53,9 @@ jira = [
 mcp = [
     "pycli-mcp>=0.3.0",
 ]
+terok = [
+    "terok",
+]
 
 
 [dependency-groups]

@@ -86,9 +86,19 @@ class KanbanTui(App[str | None]):
                 from kanban_tui.backends.claude.backend import ClaudeBackend
 
                 backend = ClaudeBackend(self.config.backend.claude_settings)
+            case Backends.TEROK:
+                try:
+                    from kanban_tui.backends.terok.backend import TerokBackend
+                except ImportError as exc:
+                    raise ImportError(
+                        "terok backend requires the terok package. "
+                        'Install with: uv tool install "kanban-tui[terok]"'
+                    ) from exc
+
+                backend = TerokBackend(self.config.backend.terok_settings)
             case _:
                 raise NotImplementedError(
-                    "Only sqlite, jira, and claude backends are supported"
+                    "Only sqlite, jira, claude, and terok backends are supported"
                 )
 
         return backend
@@ -177,6 +187,41 @@ class KanbanTui(App[str | None]):
                     message="Read-only mode: viewing Claude Code tasks from ~/.claude/tasks/",
                     severity="information",
                 )
+            case Backends.TEROK:
+                try:
+                    from kanban_tui.backends.terok.data_reader import (
+                        HAS_TEROK,
+                        list_projects,
+                    )
+                except ImportError:
+                    HAS_TEROK = False
+                if not HAS_TEROK:
+                    self.notify(
+                        title="terok backend not available",
+                        message='Install with: uv tool install "kanban-tui[terok]"',
+                        severity="warning",
+                    )
+                    with self.prevent(Select.Changed):
+                        event.select.value = f"✔  {self.app.config.backend.mode}"
+                    self.action_focus_next()
+                    return
+                projects = list_projects()
+                if not projects:
+                    self.notify(
+                        title="terok backend not available",
+                        message="No terok projects found. Create one with 'terok project-init'.",
+                        severity="warning",
+                    )
+                    with self.prevent(Select.Changed):
+                        event.select.value = f"✔  {self.app.config.backend.mode}"
+                    self.action_focus_next()
+                    return
+                self.config.set_backend(new_backend=backend_value)
+                self.notify(
+                    title="terok backend activated",
+                    message=f"Found {len(projects)} project(s).",
+                    severity="information",
+                )
         self.backend = self.get_backend()
         # This make the checkmark on the new backend
         event.select.update_values()
@@ -198,6 +243,10 @@ class KanbanTui(App[str | None]):
                 case Backends.CLAUDE:
                     self.config.set_active_claude_session(
                         new_session_id=self.active_board.name
+                    )
+                case Backends.TEROK:
+                    self.config.set_active_terok_project(
+                        new_project_id=self.active_board.name
                     )
                 case Backends.JIRA:
                     self.config.set_active_jql(new_jql=self.active_board.board_id)
